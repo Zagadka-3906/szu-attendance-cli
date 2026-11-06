@@ -1,0 +1,38 @@
+# 运行时产生的敏感文件，绝不入库
+creds.bin
+state.json
+state.bak.json
+fingerprint.txt
+.reauth.json
+.reauth.pkl
+captcha.png
+plan.json
+done.json
+config.yaml
+photo.jpg
+
+# 本地调试产物
+step*.png
+no_button.png
+diagnose.png
+.creds.tmp
+
+# 抓下来的站点静态资源（非本项目代码）
+dist/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 个人课表导出
+schedule.json
+captured.json
+template.json

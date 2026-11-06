@@ -1,0 +1,23 @@
+[Unit]
+Description=SZU attendance auto check-in (random-time daemon)
+After=network-online.target
+Wants=network-online.target
+StartLimitBurst=10
+StartLimitIntervalSec=600
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/qw-attendance
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=Asia/Shanghai
+# 排程时间与坐标都在 plan.json 里，这里是执行器
+ExecStart=/opt/qw-attendance/.venv/bin/python -m qwat.autoplan --run --photo photo.jpg
+Restart=always
+RestartSec=20
+# 只允许写项目目录
+ProtectSystem=full
+ReadWritePaths=/opt/qw-attendance
+
+[Install]
+WantedBy=multi-user.target

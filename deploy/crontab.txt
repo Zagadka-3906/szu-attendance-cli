@@ -1,0 +1,10 @@
+# 方式一：systemd 常驻（推荐）
+# cp deploy/qw-attendance.service /etc/systemd/system/
+# systemctl daemon-reload && systemctl enable --now qw-attendance
+
+# 方式二：cron 兜底（CASTGC 失效自愈 + 每日重登提醒）
+# 每分钟跑一轮 --once，窗口内才真正提交，窗口外立即退出
+* * * * * cd /opt/qw-attendance && .venv/bin/python -m qwat.daemon --config config.yaml --once >> logs/cron.log 2>&1
+
+# 每周日凌晨 3 点刷新一次登录态（有头模式需要 X / 或手动在本地跑完上传 state.json）
+0 3 * * 0 cd /opt/qw-attendance && .venv/bin/python -m qwat.capture --login --headless >> logs/login.log 2>&1
