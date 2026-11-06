@@ -1,4 +1,4 @@
-# qw-attendance
+# szu-attendance-cli
 
 深圳大学考勤系统的 Python 命令行客户端。可用自己的账号获取课表、检查签到资格、上传照片并提交签到，也可生成课次计划并常驻执行。没有独立的网页管理界面。
 
@@ -32,8 +32,8 @@
 ## 1. 安装
 
 ```bash
-git clone https://github.com/Zagadka-3906/qw-attendance.git
-cd qw-attendance
+git clone https://github.com/Zagadka-3906/szu-attendance-cli.git
+cd szu-attendance-cli
 ```
 
 Windows PowerShell：
