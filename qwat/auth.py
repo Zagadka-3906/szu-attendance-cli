@@ -38,13 +38,12 @@ def get_fingerprint(path: Path = FP_FILE) -> str:
     服务端靠它识别「可信设备」。我们生成一个稳定值并持久化，
     这样每次请求都带同一个指纹，「信任此设备」才能真正落地。
     """
-    import hashlib
+    import uuid
     if path.exists():
         v = path.read_text("utf-8").strip()
         if v:
             return v
-    seed = cas.UA_DESKTOP + "|Windows NT 10.0|zh-CN|1920x1080|24"
-    fp = hashlib.md5(seed.encode("utf-8")).hexdigest()
+    fp = uuid.uuid4().hex
     path.write_text(fp, "utf-8")
     return fp
 
@@ -124,6 +123,8 @@ def load_creds(path: Path = CREDS) -> tuple[str, str]:
         raise FileNotFoundError(f"没有凭据文件 {path}，先跑 python scripts/save_creds.py")
     blob = path.read_bytes()
     if blob.startswith(b"DPAPI1"):
+        if sys.platform != "win32":
+            raise LoginError("Windows DPAPI 凭据不能在此系统解密，请在当前机器重新保存凭据")
         payload = _dpapi(blob[6:], False)
     elif blob.startswith(b"PLAIN1"):
         payload = blob[6:]
@@ -244,13 +245,14 @@ def ensure_app(state: Path | str = "state.json", creds_path: Path = CREDS) -> re
         s = cas.load_state(state)
         try:
             cas.open_app(s)
+            cas.save_cookies(s, state)
             return s
         except cas.NotLoggedIn:
             pass
     sid, pwd = load_creds(creds_path)
     print(f"[auth] 会话失效，使用已保存凭据重新登录 {sid} …")
     s = login(sid, pwd)
-    cas.save_cookies(s, state)
     cas.open_app(s)
+    cas.save_cookies(s, state)
     print("[auth] 重新登录成功，state.json 已更新")
     return s

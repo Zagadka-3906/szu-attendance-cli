@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from qwat import checkin  # noqa: E402
+from qwat import cas, checkin  # noqa: E402
 
 HTML = """<!doctype html><html><head><meta charset="utf-8"><title>mock</title></head>
 <body>
@@ -56,9 +56,15 @@ def main() -> None:
     from PIL import Image
     Image.new("RGB", (720, 1280), (38, 61, 51)).save(photo, quality=85)
 
+    # 同时验证 HTTP 保存的登录态能被 Playwright 读取；使用虚构 Cookie。
+    state_file = tmpdir / "_state.json"
+    session = cas.new_session()
+    session.cookies.set("example", "dummy", domain="example.org", path="/")
+    cas.save_cookies(session, state_file)
+
     res = checkin.checkin_browser(
         {"lat": 22.5341, "lng": 113.9352, "accuracy": 12, "address": "示例教学楼A-101"},
-        state=tmpdir / "_no_state.json",
+        state=state_file,
         photo=str(photo),
         headless=True,
         url=page_file.as_uri(),
@@ -68,6 +74,12 @@ def main() -> None:
     print("尾部文案:", res["tail_text"].strip()[:120])
 
     ok = res["ok"] and res["geo_ok"] and res["clicked"]["recheck"] and res["clicked"]["submit"]
+    preview = checkin.checkin_browser(
+        {"lat": 22.5341, "lng": 113.9352, "address": '示例教学楼 "A"'},
+        state=state_file, photo=str(photo), headless=True,
+        url=page_file.as_uri(), dry_run=True,
+    )
+    ok = ok and preview["geo_ok"] and preview["dry_run"] and preview["clicked"]["submit"] is None
     print("\n链路:", "全部通过 ✅" if ok else "存在失败项 ❌")
     shutil.rmtree(tmpdir, ignore_errors=True)
     sys.exit(0 if ok else 1)

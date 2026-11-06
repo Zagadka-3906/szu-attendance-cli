@@ -26,6 +26,11 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+build/
+logs/
+tests/_tmp/
+tests/_shim_probe.html
+.pytest_cache/
 
 # OS
 .DS_Store

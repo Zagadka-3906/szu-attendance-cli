@@ -4,6 +4,7 @@ python scripts/check_state.py [state.json]
 """
 from __future__ import annotations
 
+import argparse
 import datetime
 import json
 import sys
@@ -15,7 +16,9 @@ from qwat import cas  # noqa: E402
 
 
 def main() -> None:
-    path = Path(sys.argv[1] if len(sys.argv) > 1 else "state.json")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("state", nargs="?", type=Path, default=Path("state.json"))
+    path = parser.parse_args().state
     if not path.exists():
         print(f"[-] {path} 不存在，先跑 python -m qwat.capture --login")
         return
@@ -43,7 +46,7 @@ def main() -> None:
     s = cas.load_state(path)
     try:
         t = cas.mint_ticket(s)
-        print(f"[+] CASTGC 有效，成功铸票：{t[:26]}…")
+        print("[+] CASTGC 有效，成功取得服务票据（不显示票据值）")
         r = s.get(cas.CALLBACK, params={"redirect": "/attendance", "source": "user",
                                         "ticket": t}, allow_redirects=False, timeout=20)
         print(f"[+] 回灌 callback：{r.status_code} → {r.headers.get('Location','')[:80]}")

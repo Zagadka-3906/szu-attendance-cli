@@ -2,12 +2,12 @@
 state_file: state.json
 done_file: done.json
 
-# 拍照签到的照片（手机拍一张教室照最稳；也可每节课单独覆盖）
+# 自己准备的 JPEG 照片，也可在每节课中单独设置 photo。
 photo: photo.jpg
 jitter_m: 0          # 想在围栏内随机漂移就填 3~5
 
 # 课表：weekday 1=周一。lat/lng 可留空 —— 会自动用服务端 /api/v1/buildings
-# 里该楼栋的圆心坐标（实测围栏半径 175m，圆心必在范围内）。
+# 里该楼栋的圆心坐标。实际资格与范围以服务端返回为准。
 # 以下为虚构课程与教室，使用前替换为自己的课表，不要提交真实配置。
 courses:
   - name: "示例课程A"

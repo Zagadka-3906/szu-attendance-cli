@@ -111,8 +111,8 @@ def sign(state: str | Path = "state.json", course_name: str | None = None,
     instance = cd.get("course_instance") or {}
     want_date, want_start = target.get("date"), str(target.get("start_time") or "")[:5]
     got_date, got_start = instance.get("date"), str(instance.get("start_time") or "")[:5]
-    if occurrence and want_start and got_start and (got_start != want_start or
-                                                    (want_date and got_date and got_date != want_date)):
+    if ((want_start and got_start != want_start) or
+            (want_date and got_date != want_date)):
         if verbose:
             print(f"[!] 服务端当前课次是 {got_date} {got_start}，不是计划的 {want_date} {want_start}")
         return {"ok": False, "reason": "instance_mismatch",
@@ -175,8 +175,8 @@ def main() -> None:
 
     if not a.dry_run and not photo:
         sys.exit("[-] 没有照片：用 --photo 指定，或在 config.yaml 里写 photo:")
-    if photo and not Path(photo).exists():
-        sys.exit(f"[-] 照片不存在：{photo}（可跑 python scripts/make_blank_photo.py）")
+    if not a.dry_run and photo and not Path(photo).is_file():
+        sys.exit(f"[-] 照片不存在：{photo}，请提供自己准备的 JPEG 照片")
 
     res = sign(state, a.course, at, photo, a.dry_run, jitter)
     print("\n结果:", json.dumps(res, ensure_ascii=False)[:1200])

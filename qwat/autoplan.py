@@ -8,7 +8,7 @@
 设计要点：
   · 每条课次的时间与坐标在 build 阶段就随机定好并落盘，重启不会变（可 --rebuild 重摇）
   · 坐标取楼栋围栏圆心 + 随机方位/距离（25m ~ 0.85R），保证 in_range 且不总是同一点
-  · 课堂开始前 15 分钟服务端就放行（实测 valid_start = start - 15min），前 1–5 分钟必在窗口内
+  · 默认课前 1–5 分钟尝试，是否允许签到仍由服务端当前窗口决定
   · 已签到的课次由 check-signin-status 直接短路，不会重复提交
 """
 from __future__ import annotations
@@ -27,14 +27,14 @@ PLAN = Path("plan.json")
 
 # ---------------------------------------------------------------- 排程构建
 def build_plan(state: str | Path = "state.json", days: int = 60,
-               lead: tuple[int, int] = (1, 5), seed: int = 0,
-               only_future_hours: int = 0) -> list[dict]:
+               lead: tuple[float, float] = (1, 5), seed: int = 0) -> list[dict]:
+    if days <= 0 or not (0 <= lead[0] <= lead[1]):
+        raise ValueError("days 必须大于 0，提前分钟数须满足 0 <= MIN <= MAX")
     c = api.QwClient.from_state(state)
     schedule = api.flatten(c.schedule(days=days))
     buildings = c.buildings()
 
     rng = random.Random(seed) if seed else random.Random()
-    now = dt.datetime.now()
     entries: list[dict] = []
     unresolved: list[str] = []
 
@@ -61,8 +61,6 @@ def build_plan(state: str | Path = "state.json", days: int = 60,
 
         lead_min = rng.uniform(lead[0], lead[1])
         target = start_dt - dt.timedelta(minutes=lead_min)
-        if start_dt < now - dt.timedelta(hours=only_future_hours or 0):
-            pass  # 过往课次也保留，方便回看；run 阶段会自动跳过
 
         entries.append({
             "date": date,
@@ -142,6 +140,12 @@ def run(plan_path: Path = PLAN, state: str | Path = "state.json",
     plan = load_plan(plan_path)
     if not plan:
         raise SystemExit("[-] 没有排程，先跑 python -m qwat.autoplan --build")
+    if not dry_run:
+        for entry in plan:
+            if entry.get("state") == "pending":
+                image = entry.get("photo") or photo
+                if not image or not Path(image).is_file():
+                    raise SystemExit("[-] 待执行任务缺少照片，请用 --photo 指定存在的 JPEG 文件")
 
     print(f"[*] 排程 {len(plan)} 条 · 待执行 "
           f"{sum(1 for e in plan if e['state'] == 'pending')} 条")
@@ -162,7 +166,10 @@ def run(plan_path: Path = PLAN, state: str | Path = "state.json",
                 last_auth = time.time()
 
         now = dt.datetime.now()
+        previous_states = [e.get("state") for e in plan]
         todo = due_entries(plan, now)
+        if not dry_run and previous_states != [e.get("state") for e in plan]:
+            save_plan(plan, plan_path)
         for e in todo:
             print(f"\n[{now:%H:%M:%S}] → {e['course']} {e['classroom']} "
                   f"({e['date']} {e['start']}) 目标时刻 {e['target_at'][11:]} "
@@ -192,6 +199,8 @@ def run(plan_path: Path = PLAN, state: str | Path = "state.json",
                 res = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
 
             print(f"    ok={res.get('ok')} {res.get('reason') or ''}")
+            if dry_run:
+                continue  # 演练不写任务状态、重试时间或回执。
             e["attempts"] = int(e.get("attempts") or 0) + 1
             reason = str(res.get("reason") or "")
             end_dt = dt.datetime.strptime(f"{e['date']} {e['end']}", "%Y-%m-%d %H:%M")
@@ -213,14 +222,16 @@ def run(plan_path: Path = PLAN, state: str | Path = "state.json",
                     print(f"    服务端当前课次 {res.get('got')} ≠ 计划 {res.get('want')}，{wait}s 后重试")
             save_plan(plan, plan_path)
 
-        if once:
+        if once or dry_run:
             break
 
-        pending = [e for e in plan if e["state"] in ("pending", "failed")]
+        pending = [e for e in plan if e["state"] == "pending"]
         if not pending:
             print("[*] 排程全部处理完，退出")
             break
-        nxt = min(dt.datetime.strptime(e["target_at"], "%Y-%m-%dT%H:%M:%S") for e in pending)
+        nxt = min(max(dt.datetime.fromisoformat(e["target_at"]),
+                      dt.datetime.fromisoformat(e.get("retry_after") or e["target_at"]))
+                  for e in pending)
         gap = (nxt - dt.datetime.now()).total_seconds()
         time.sleep(max(2, min(poll, gap)))
 
@@ -236,13 +247,12 @@ def ensure_timezone() -> None:
     try:
         time.tzset()          # Linux/macOS 生效
     except AttributeError:
-        return                # Windows 没有 tzset，只能提示
+        raise SystemExit("请先将 Windows 系统时区设置为 UTC+8 后再执行排程")
     print(f"[!] 已临时切到 Asia/Shanghai，现在 {dt.datetime.now():%Y-%m-%d %H:%M}")
 
 
 # ---------------------------------------------------------------- CLI
 def main() -> None:
-    ensure_timezone()
     ap = argparse.ArgumentParser(description="全课表自动排程签到")
     ap.add_argument("--build", action="store_true", help="生成 plan.json")
     ap.add_argument("--rebuild", action="store_true", help="重摇时间与坐标")
@@ -256,10 +266,20 @@ def main() -> None:
     ap.add_argument("--state", default="state.json")
     ap.add_argument("--plan", default="plan.json")
     a = ap.parse_args()
+    if not (a.build or a.rebuild or a.run):
+        ap.print_help()
+        return
+    if a.days <= 0 or not (0 <= a.lead[0] <= a.lead[1]):
+        ap.error("--days 必须大于 0，--lead 须满足 0 <= MIN <= MAX")
+    ensure_timezone()
 
     pp = Path(a.plan)
 
-    if a.build or a.rebuild or not pp.exists():
+    if a.run and not pp.exists() and not (a.build or a.rebuild):
+        ap.error("计划文件不存在，请先使用 --build 生成并检查计划")
+    if a.build and pp.exists() and not a.rebuild:
+        ap.error("计划已存在；确认要覆盖时使用 --rebuild")
+    if a.build or a.rebuild:
         entries = build_plan(a.state, a.days, tuple(a.lead), a.seed)
         save_plan(entries, pp)
         print(f"[+] {len(entries)} 条排程 → {pp.resolve()}")

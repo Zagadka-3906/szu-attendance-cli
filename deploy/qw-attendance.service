@@ -13,7 +13,7 @@ Environment=PYTHONUNBUFFERED=1
 Environment=TZ=Asia/Shanghai
 # 排程时间与坐标都在 plan.json 里，这里是执行器
 ExecStart=/opt/qw-attendance/.venv/bin/python -m qwat.autoplan --run --photo photo.jpg
-Restart=always
+Restart=on-failure
 RestartSec=20
 # 只允许写项目目录
 ProtectSystem=full

@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qw-attendance"
+version = "0.1.0"
+description = "Command-line client and scheduler for SZU attendance"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["requests>=2.31", "PyYAML>=6.0", "cryptography>=42"]
+
+[project.optional-dependencies]
+browser = ["playwright>=1.44", "Pillow>=10"]
+
+[tool.setuptools]
+packages = ["qwat"]
+
+[tool.setuptools.package-data]
+qwat = ["wxshim.js"]

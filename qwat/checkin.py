@@ -1,85 +1,21 @@
-"""签到执行器。
-
-两条路径：
-  A. HTTP 直连（config.mode=http）——服务端只看到提交的经纬度。
-  B. 浏览器驱动（config.mode=browser）——页面强依赖企微 JSSDK / 拍照上传时用这条。
-     wxshim.js 会在页面脚本之前接管 navigator.geolocation / wx.getLocation /
-     WeixinJSBridge / AMap / qq.maps 五条取点通道，所以「定位服务未就绪」不再出现。
-"""
+"""Optional Playwright browser check-in. HTTP calls live in qwat.sign."""
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
-import requests
+from . import cas
 
-from . import cas, geo
-
-TEMPLATE = Path("template.json")
 SHIM_PATH = Path(__file__).with_name("wxshim.js")
 
 
-# ---------------------------------------------------------------- 模板渲染
-def _render(obj, ctx: dict):
-    if isinstance(obj, dict):
-        return {k: _render(v, ctx) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_render(v, ctx) for v in obj]
-    if isinstance(obj, str):
-        def repl(m):
-            ns, key = m.group(1).split(".", 1)
-            return str(ctx.get(ns, {}).get(key, m.group(0)))
-        return re.sub(r"\{\{([a-zA-Z_]+\.\w+)\}\}", repl, obj)
-    return obj
-
-
-def render_template(tpl: dict, coords: dict, task: dict | None = None) -> dict:
-    ctx = {"geo": coords, "task": task or {}}
-    return {
-        "method": tpl["method"],
-        "url": _render(tpl["url"], ctx),
-        "headers": _render(tpl["headers"], ctx),
-        "payload": _render(tpl["payload"], ctx),
-    }
-
-
-# ---------------------------------------------------------------- A. HTTP
-def checkin_http(session: requests.Session, coords: dict, task: dict | None = None,
-                 tpl_path: Path = TEMPLATE, dry_run: bool = False) -> dict:
-    tpl = json.loads(tpl_path.read_text("utf-8"))
-    req = render_template(tpl, coords, task)
-
-    headers = dict(req["headers"])
-    headers.setdefault("Referer", cas.APP + "/")
-    headers.setdefault("Origin", "https://qw.szu.edu.cn")
-
-    payload = req["payload"]
-    if dry_run:
-        print("[dry-run]", req["method"], req["url"])
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
-        return {"dry_run": True}
-
-    if isinstance(payload, (dict, list)):
-        r = session.request(req["method"], req["url"], json=payload,
-                            headers=headers, timeout=20)
-    else:
-        r = session.request(req["method"], req["url"], data=payload,
-                            headers=headers, timeout=20)
-
-    print(f"[{r.status_code}] {req['url'][:110]}")
-    print("   ", r.text[:400])
-    return {"status": r.status_code, "body": r.text[:2000],
-            "ok": r.ok and '"code":0' in r.text.replace(" ", "")}
-
-
-# ---------------------------------------------------------------- B. 浏览器
 def _shim_js(coords: dict) -> str:
     return (SHIM_PATH.read_text("utf-8")
             .replace("__LAT__", repr(float(coords["lat"])))
             .replace("__LNG__", repr(float(coords["lng"])))
             .replace("__ACC__", repr(float(coords.get("accuracy", 12))))
-            .replace("__ADDRESS__", coords.get("address") or "广东省深圳市南山区"))
+            .replace("__ADDRESS__", json.dumps(coords.get("address") or "广东省深圳市南山区",
+                                               ensure_ascii=False)[1:-1]))
 
 
 def _click_any(page, names: list[str], timeout: int = 3000) -> str | None:
@@ -114,7 +50,7 @@ def _wait_text_gone(page, needles: list[str], timeout_s: float = 12.0) -> bool:
 def checkin_browser(coords: dict, state: Path = Path("state.json"),
                     photo: str | None = None, headless: bool = True,
                     url: str | None = None, ua: str | None = None,
-                    keep_open: bool = False) -> dict:
+                    keep_open: bool = False, dry_run: bool = False) -> dict:
     from playwright.sync_api import sync_playwright
 
     posts: list[dict] = []
@@ -174,14 +110,16 @@ def checkin_browser(coords: dict, state: Path = Path("state.json"),
         geo_ok = ("位置未知" not in body) and ("定位服务未就绪" not in body)
         print(f"[geo] {'OK' if geo_ok else 'FAIL'} · 重取定位按钮={clicked}")
 
-        if photo:
+        if photo and not dry_run:
             try:
                 page.set_input_files("input[type=file]", photo, timeout=4000)
                 page.wait_for_timeout(1500)
             except Exception as exc:
                 logs.append(f"photo: {exc}")
 
-        submit = _click_any(page, ["上传照片并签到", "确认签到", "立即签到", "提交签到", "签到"])
+        submit = None
+        if not dry_run and geo_ok:
+            submit = _click_any(page, ["上传照片并签到", "确认签到", "立即签到", "提交签到", "签到"])
         page.wait_for_timeout(3500)
         page.screenshot(path="step3_result.png", full_page=True)
         after = page.inner_text("body")
@@ -196,6 +134,7 @@ def checkin_browser(coords: dict, state: Path = Path("state.json"),
     fail = any(k in after for k in ("签到失败", "提交失败", "不在签到范围", "超出范围"))
     return {
         "ok": hit and not fail,
+        "dry_run": dry_run,
         "geo_ok": geo_ok,
         "clicked": {"recheck": clicked, "submit": submit},
         "posts": posts,
@@ -204,58 +143,31 @@ def checkin_browser(coords: dict, state: Path = Path("state.json"),
     }
 
 
-# ---------------------------------------------------------------- 入口
-def run(state: Path, coords: dict, task: dict | None = None, mode: str = "http",
-        dry_run: bool = False, jitter_m: float = 4.0, photo: str | None = None,
-        headless: bool = True, keep_open: bool = False) -> dict:
-    lng, lat = geo.jitter(coords["lng"], coords["lat"], jitter_m)
-    c = {"lng": round(lng, 6), "lat": round(lat, 6),
-         "accuracy": coords.get("accuracy", 12),
-         "address": coords.get("address", "")}
-
-    if mode == "browser":
-        return checkin_browser(c, state=state, photo=photo,
-                               headless=headless, keep_open=keep_open)
-
-    s = cas.load_state(state)
-    try:
-        cas.open_app(s)
-    except cas.NotLoggedIn:
-        return {"ok": False, "reason": "CASTGC 失效，需要重新 --login"}
-    return checkin_http(s, c, task, dry_run=dry_run)
-
-
-def _cli() -> None:
+def main() -> None:
     import argparse
-    import yaml
 
-    ap = argparse.ArgumentParser(description="手动触发一次签到")
-    ap.add_argument("--config", default="config.yaml")
-    ap.add_argument("--course", default=None, help="课名，缺省取课表第一节")
-    ap.add_argument("--coords", default=None, help='直接给坐标 {"lat":22.53,"lng":113.93}')
-    ap.add_argument("--state", default="state.json")
-    ap.add_argument("--mode", default=None, choices=["http", "browser"])
-    ap.add_argument("--photo", default=None, help="拍照签到时使用的图片路径")
-    ap.add_argument("--head", action="store_true", help="有头模式，便于肉眼确认")
+    ap = argparse.ArgumentParser(description="浏览器辅助签到；HTTP 签到请使用 qwat.sign")
+    ap.add_argument("--at", nargs=2, type=float, required=True, metavar=("LAT", "LNG"))
+    ap.add_argument("--state", type=Path, default=Path("state.json"))
+    ap.add_argument("--photo")
+    ap.add_argument("--head", action="store_true", help="显示浏览器窗口")
     ap.add_argument("--keep-open", action="store_true")
-    ap.add_argument("--dry-run", action="store_true")
-    a = ap.parse_args()
-
-    mode = a.mode or "http"
-    if a.coords:
-        coords = json.loads(a.coords)
-    else:
-        cfg = yaml.safe_load(Path(a.config).read_text("utf-8"))
-        courses = cfg["courses"]
-        c = next((x for x in courses if x["name"] == a.course), courses[0])
-        coords = {"lat": c["lat"], "lng": c["lng"],
-                  "accuracy": c.get("accuracy", 12), "address": c.get("room", "")}
-        mode = a.mode or cfg.get("mode", "http")
-
-    res = run(Path(a.state), coords, mode=mode, dry_run=a.dry_run,
-              photo=a.photo, headless=not a.head, keep_open=a.keep_open)
-    print(json.dumps(res, ensure_ascii=False, indent=2))
+    ap.add_argument("--dry-run", action="store_true", help="仅检查页面定位，不上传照片或点击提交")
+    ap.add_argument("--yes", action="store_true", help="确认点击页面签到按钮")
+    args = ap.parse_args()
+    if not args.dry_run and not args.yes:
+        ap.error("实际提交需要 --yes，请先用 --dry-run 检查页面")
+    if not args.state.is_file():
+        ap.error("登录态不存在，请先使用 qwat.capture --login")
+    if not args.dry_run and (not args.photo or not Path(args.photo).is_file()):
+        ap.error("实际提交需要 --photo 指定存在的照片")
+    result = checkin_browser({"lat": args.at[0], "lng": args.at[1]},
+                             state=args.state, photo=args.photo,
+                             headless=not args.head, keep_open=args.keep_open,
+                             dry_run=args.dry_run)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    raise SystemExit(0 if (result["geo_ok"] if args.dry_run else result["ok"]) else 2)
 
 
 if __name__ == "__main__":
-    _cli()
+    main()

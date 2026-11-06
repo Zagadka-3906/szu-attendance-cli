@@ -153,7 +153,6 @@ def main() -> None:
         print(f"[*] 提交 service={data['service'][:70]}… reAuthType={data['reAuthType']}")
         r = s.post(f"{cas.CAS}/reAuthCheck/reAuthSubmit.do", data=data, timeout=25)
         print(f"[*] HTTP {r.status_code}")
-        print(f"[*] Set-Cookie: {r.headers.get('Set-Cookie', '')[:200]}")
         try:
             j = r.json()
             print(f"[*] 完整响应: {json.dumps(j, ensure_ascii=False)[:600]}")

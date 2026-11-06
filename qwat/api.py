@@ -1,6 +1,6 @@
 """qw.szu.edu.cn/attendance 的真实协议客户端。
 
-从 dist/*.js 反推得到的完整链路：
+业务调用链路：
 
   GET  /attendance/cas/status                      → {logged_in, user:{username,name}}
   GET  /attendance/api/v1/student-schedule?days=7&student_id=ID
@@ -11,7 +11,7 @@
   POST /attendance/signin                          → 最终签到
 
 关键结论：
-  · 坐标由前端算完再提交，服务端只收到数字 —— 因此 HTTP 重放等价于真机
+  · 坐标作为请求参数提交，是否接受由服务端当前策略决定
   · 定位分支由 UA 决定：wxwork/MicroMessenger 走 wx.getLocation（必须企微内），
     桌面 UA 走 navigator.geolocation（任何浏览器都行）
 """

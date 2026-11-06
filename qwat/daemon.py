@@ -56,6 +56,8 @@ def main() -> None:
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
+    from .autoplan import ensure_timezone
+    ensure_timezone()
 
     cfg = yaml.safe_load(Path(a.config).read_text("utf-8"))
     done_path = Path(cfg.get("done_file", "done.json"))
@@ -98,11 +100,11 @@ def main() -> None:
             continue
 
         print(f"    → ok={res.get('ok')} {res.get('reason') or ''}")
-        if res.get("ok"):
+        if res.get("ok") and not a.dry_run:
             done.add(key)
             save_done(done_path, done)
 
-        if a.once:
+        if a.once or a.dry_run:
             return
         time.sleep(POLL)
 

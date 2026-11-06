@@ -38,12 +38,11 @@ def main() -> None:
                   f"({c_.get('date')})")
             target = c_
     if a.course:
-        for day in sch:
-            for x in (day.get("courses") or []):
-                if x.get("course_name") == a.course:
-                    target = {**x, "date": day.get("date")}
-                    print(f"  指定课程: {x.get('course_name')} · {x.get('classroom')} · {day.get('date')}")
-                    break
+        candidates = [x for x in api.flatten(sch) if x.get("course_name") == a.course]
+        if not candidates:
+            raise SystemExit("课表中没有指定课程")
+        target = api.pick_occurrence(candidates)
+        print(f"  指定课程: {target.get('course_name')} · {target.get('classroom')} · {target.get('date')}")
 
     bs = c.buildings()
     print(f"[楼栋] {len(bs)} 座")

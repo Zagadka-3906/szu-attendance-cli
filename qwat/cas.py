@@ -1,6 +1,6 @@
 """SZU CAS 会话层：铸票 / 登录态采集 / 复用。
 
-实测链路（2026-11 现场抓取，scripts/probe.py 可复现）：
+协议分析时观察到的链路（站点策略可能调整）：
 
   UA = 桌面 Chrome：
     GET https://authserver.szu.edu.cn/authserver/login?service=...%2Fcas%2Fcallback...
@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import parse_qs, urlparse
 
 import requests
 
@@ -28,10 +28,6 @@ APP = "https://qw.szu.edu.cn/attendance"
 SERVICE = APP + "/cas/callback?redirect=%2Fattendance&source=user"
 CALLBACK = APP + "/cas/callback"
 
-UA_WXWORK = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/122.0.0.0 Safari/537.36 wxwork/4.1.26 MicroMessenger/7.0.1 NetType/WIFI Language/zh"
-)
 UA_DESKTOP = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/129.0.0.0 Safari/537.36"
@@ -99,13 +95,10 @@ def open_app(session: requests.Session) -> requests.Response:
     return session.get(APP + "/", allow_redirects=True, timeout=20)
 
 
-def probe_login_page(session: requests.Session) -> str:
-    """拿 CAS 登录页 HTML（加 type=user 绕开 source=user 的企微强制跳转）。"""
-    url = f"{CAS}/login?service={quote(SERVICE, safe='')}&type=user"
-    return session.get(url, timeout=20).text
-
-
 def save_cookies(session: requests.Session, path: str | Path) -> None:
-    cookies = [{"name": c.name, "value": c.value, "domain": c.domain, "path": c.path}
+    cookies = [{"name": c.name, "value": c.value, "domain": c.domain, "path": c.path,
+                "expires": c.expires if c.expires is not None else -1,
+                "httpOnly": bool(c.has_nonstandard_attr("HttpOnly")),
+                "secure": c.secure, "sameSite": "Lax"}
                for c in session.cookies]
-    Path(path).write_text(json.dumps({"cookies": cookies}, ensure_ascii=False, indent=2), "utf-8")
+    Path(path).write_text(json.dumps({"cookies": cookies, "origins": []}, ensure_ascii=False, indent=2), "utf-8")

@@ -27,7 +27,7 @@ def main() -> None:
         print(f"[*] 用已保存凭据登录 {sid} …")
         s = auth.login(sid, pwd)
         cas.save_cookies(s, Path(a.state))
-        print("[+] 登录成功，CASTGC =", (cas.castgc(s) or "")[:20], "…")
+        print("[+] 登录成功，登录态已刷新")
         return
 
     sid = a.id or input("学号: ").strip()
@@ -48,7 +48,8 @@ def main() -> None:
 
     auth.save_creds(sid, pwd)
     cas.save_cookies(s, Path(a.state))
-    print(f"[+] 凭据已验证并保存 → {auth.CREDS.resolve()}（DPAPI 加密，仅当前 Windows 账户可解）")
+    protection = "DPAPI 加密，仅当前 Windows 账户可解" if sys.platform == "win32" else "明文 JSON，文件权限 0600"
+    print(f"[+] 凭据已验证并保存 → {auth.CREDS.resolve()}（{protection}）")
     print(f"[+] 登录态已刷新 → {Path(a.state).resolve()}")
 
 

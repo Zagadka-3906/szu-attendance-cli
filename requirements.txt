@@ -1,4 +1,3 @@
-requests>=2.31
-playwright>=1.44
-PyYAML>=6.0
-cryptography>=42
+# HTTP dependencies are defined in pyproject.toml.
+# Optional browser tools: python -m pip install -e ".[browser]"
+-e .

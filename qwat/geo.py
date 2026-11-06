@@ -63,10 +63,6 @@ def jitter(lng: float, lat: float, meters: float = 5.0) -> tuple[float, float]:
     return lng + dlng, lat + dlat
 
 
-def fmt(lng: float, lat: float, digits: int = 6) -> dict[str, float]:
-    return {"lat": round(lat, digits), "lng": round(lng, digits)}
-
-
 def random_point(lat: float, lng: float, radius_m: float,
                  inner_m: float = 25.0, outer_ratio: float = 0.85,
                  rng: random.Random | None = None) -> tuple[float, float]:
@@ -75,8 +71,10 @@ def random_point(lat: float, lng: float, radius_m: float,
     留 15% 余量是为了避开服务端 distance<=radius 判定在坐标精度上的边界抖动。
     """
     rng = rng or random
-    outer = max(inner_m + 1.0, radius_m * outer_ratio)
-    r = rng.uniform(inner_m, outer)
+    if radius_m <= 0 or inner_m < 0 or not 0 < outer_ratio < 1:
+        raise ValueError("围栏半径须为正，内半径非负，外半径比例须在 0 和 1 之间")
+    outer = radius_m * outer_ratio
+    r = rng.uniform(min(inner_m, outer), outer)
     theta = rng.uniform(0.0, 2.0 * math.pi)
     dlat = r * math.cos(theta) / 111_320.0
     dlng = r * math.sin(theta) / (111_320.0 * math.cos(math.radians(lat)))
